@@ -302,7 +302,7 @@ public class TimeBucketsActivity extends AppCompatActivity {
     @Override
     public void onCreateContextMenu(ContextMenu menu, View v, ContextMenu.ContextMenuInfo menuInfo) {
         super.onCreateContextMenu(menu, v, menuInfo);
-        if (v.getId() == R.id.list) {
+        if (v.getId() == R.id.list && ((AdapterView.AdapterContextMenuInfo) menuInfo).position != 0) {
             MenuInflater inflater = getMenuInflater();
             inflater.inflate(R.menu.context_menu, menu);
         }
@@ -311,12 +311,12 @@ public class TimeBucketsActivity extends AppCompatActivity {
     @Override
     public boolean onContextItemSelected(MenuItem item) {
         AdapterView.AdapterContextMenuInfo info = (AdapterView.AdapterContextMenuInfo) item.getMenuInfo();
+        if (info.position == 0) return true;
+
         Bucket selectedBucket = mBuckets.get(info.position);
         boolean isCurrentBucket = selectedBucket.equals(mCurrentBucket);
 
         switch (item.getItemId()) {
-
-
             case R.id.context_delete:
                 // add stuff here
                 mBuckets.remove(selectedBucket);
