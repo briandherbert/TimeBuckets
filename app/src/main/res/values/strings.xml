@@ -1,3 +1,10 @@
 <resources>
-    <string name="app_name">TimeBuckets</string>
+    <string name="app_name">Time Buckets</string>
+    <string name="pause">PAUSE</string>
+    <string name="menu_title_add_bucket">Add bucket</string>
+    <string name="menu_title_clear_all">Clear all times</string>
+    <string name="bucket_started_at">&lt;b>%1$s&lt;/b> started at %2$s</string>
+    <string name="time_and_counting">%s and counting</string>
+    <string name="time_elapsed">%s elapsed</string>
+    <string name="hint_new_bucket">New bucket</string>
 </resources>
