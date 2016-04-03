@@ -1,13 +1,18 @@
 package com.burningaltar.timebuckets;
 
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.os.Handler;
+import android.os.Message;
 import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.text.Html;
 import android.text.format.DateUtils;
+import android.util.Log;
 import android.view.ContextMenu;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -32,19 +37,24 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.TimeZone;
 
 public class TimeBucketsActivity extends AppCompatActivity {
     static final String TAG = TimeBucketsActivity.class.getSimpleName();
 
-    static final String KEY_BUCKET_NAMES = "KEY_SAVED_BUCKETS";
     static final String KEY_CURRENT_BUCKET_NAME = "KEY_LAST_BUCKET";
     static final String KEY_CURRENT_BUCKET_START_TIME = "KEY_LAST_TIME";
+    static final String KEY_LAST_TICK = "KEY_LAST_TICK";
     static final String PREFIX_KEY_BUCKET_DURATION = "PREFIX_KEY_BUCKET_DURATION";
+    static final String PREFIX_KEY_BUCKET_NAME = "PREFIX_KEY_BUCKET_NAME";
 
     static Bucket BUCKET_BREAK;
 
     static int HIGHLIGHT_COLOR;
+
+    static final long UPDATE_TICK_MS = 1000;
 
     static class Bucket {
         public Bucket(@NonNull String name, long duration) {
@@ -89,8 +99,14 @@ public class TimeBucketsActivity extends AppCompatActivity {
     static SimpleDateFormat mStartFormat = new SimpleDateFormat("hh:mm:ss a");
     static SimpleDateFormat mElapsedFormat = new SimpleDateFormat("HH:mm:ss");
 
+    static {
+        mElapsedFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+    }
+
     Bucket mCurrentBucket;
     long mCurrentStartTime = -1;
+    long mLastTick = -1;
+
 
     TextView mLblInfo;
     ListView mListView;
@@ -151,19 +167,31 @@ public class TimeBucketsActivity extends AppCompatActivity {
     @Override
     public void onPause() {
         super.onPause();
+        mHandler.removeMessages(BucketsHandler.MESSAGE_UPDATE_CURRENT_DURATION);
         save();
     }
 
-    public void setCurrentBucket(Bucket bucket) {
-        if (mCurrentBucket == bucket) return;
+    void onTick() {
+        long time = System.currentTimeMillis();
 
         if (mCurrentBucket != null) {
-            mBuckets.get(mBuckets.indexOf(mCurrentBucket)).addTime(System.currentTimeMillis() - mCurrentStartTime);
+            mBuckets.get(mBuckets.indexOf(mCurrentBucket)).addTime(time - mLastTick);
         }
 
-        mCurrentBucket = bucket;
-        mCurrentStartTime = System.currentTimeMillis();
-        updateInfoTextToSelection();
+        mLastTick = time;
+    }
+
+    public void setCurrentBucket(Bucket bucket) {
+        onTick();
+
+        if (mCurrentBucket != bucket) {
+            mCurrentBucket = bucket;
+            mCurrentStartTime = mLastTick;
+        }
+
+        String str = getString(R.string.bucket_started_at, mCurrentBucket.name, mStartFormat.format(new Date(mCurrentStartTime)));
+        CharSequence styledStr = Html.fromHtml(str);
+        mLblInfo.setText(styledStr);
 
         mListView.setItemChecked(mAdapter.getPosition(bucket), true);
         mAdapter.notifyDataSetChanged();
@@ -174,48 +202,87 @@ public class TimeBucketsActivity extends AppCompatActivity {
             mSharedPrefs = this.getSharedPreferences(TAG, Context.MODE_PRIVATE);
 
         SharedPreferences.Editor editor = mSharedPrefs.edit();
-        Set<String> bucketNames = new LinkedHashSet<>();
 
+        onTick();
+
+        int i = 0;
         for (Bucket bucket : mBuckets) {
             if (bucket.equals(BUCKET_BREAK)) continue;
+            editor.putString(PREFIX_KEY_BUCKET_NAME + i++, bucket.name);
             editor.putLong(PREFIX_KEY_BUCKET_DURATION + bucket.name, bucket.duration);
-            bucketNames.add(bucket.name);
+            Log.v("blarg", "saving " + bucket.name);
         }
 
-        editor.putStringSet(KEY_BUCKET_NAMES, bucketNames);
-        if (mCurrentBucket != null) editor.putString(KEY_CURRENT_BUCKET_NAME, mCurrentBucket.name);
-        editor.putLong(KEY_CURRENT_BUCKET_START_TIME, mCurrentStartTime);
+        editor.remove(PREFIX_KEY_BUCKET_NAME + i);
+
+        if (mCurrentBucket != null) {
+            editor.putString(KEY_CURRENT_BUCKET_NAME, mCurrentBucket.name);
+            editor.putLong(KEY_CURRENT_BUCKET_START_TIME, mCurrentStartTime);
+            editor.putLong(KEY_LAST_TICK, mLastTick);
+        }
+
         editor.commit();
     }
 
     public void restore() {
         // DO NOT CALL #setCurrentBucket() FROM HERE!
-        if (mSharedPrefs == null)
+        if (mSharedPrefs == null) {
             mSharedPrefs = this.getSharedPreferences(TAG, Context.MODE_PRIVATE);
-
-        String currentName = mSharedPrefs.getString(KEY_CURRENT_BUCKET_NAME, null);
-        if (currentName != null) {
-            mCurrentStartTime = mSharedPrefs.getLong(KEY_CURRENT_BUCKET_START_TIME, System.currentTimeMillis());
-            mCurrentBucket = new Bucket(currentName, System.currentTimeMillis() - mCurrentStartTime);
-            updateInfoTextToSelection();
         }
 
-        Set<String> savedBucketNames = mSharedPrefs.getStringSet(KEY_BUCKET_NAMES, null);
+        String currentName = mSharedPrefs.getString(KEY_CURRENT_BUCKET_NAME, null);
 
         addBucket(BUCKET_BREAK);
 
-        if (savedBucketNames != null) {
-            for (String name : savedBucketNames) {
-                long duration = mSharedPrefs.getLong(PREFIX_KEY_BUCKET_DURATION + name, 0);
+        int i = 0;
+        String name;
+        while ((name = mSharedPrefs.getString(PREFIX_KEY_BUCKET_NAME + i++, null)) != null) {
+            if (name == null) break;
+
+            long duration = mSharedPrefs.getLong(PREFIX_KEY_BUCKET_DURATION + name, 0);
+            Log.v("blarg", "restoring " + name);
+
+            if (name.equals(currentName)) {
+                mCurrentStartTime = mSharedPrefs.getLong(KEY_CURRENT_BUCKET_START_TIME, -1);
+                mLastTick = mSharedPrefs.getLong(KEY_LAST_TICK, -1);
+                mCurrentBucket = new Bucket(name, duration + System.currentTimeMillis() - mLastTick);
+                addBucket(mCurrentBucket);
+                setCurrentBucket(mCurrentBucket);
+            } else {
                 addBucket(new Bucket(name, duration));
             }
         }
+
+        if (mCurrentBucket == null) {
+            setCurrentBucket(BUCKET_BREAK);
+        }
     }
 
-    void updateInfoTextToSelection() {
-        String str = getString(R.string.bucket_started_at, mCurrentBucket.name, mStartFormat.format(new Date(mCurrentStartTime)));
-        CharSequence styledStr = Html.fromHtml(str);
-        mLblInfo.setText(styledStr);
+    public void showNewInput() {
+        if (mTxtNewCategory == null) return;
+
+        mTxtNewCategory.setTranslationY(-mTxtNewCategory.getHeight());
+        mTxtNewCategory.setVisibility(View.VISIBLE);
+
+        mTxtNewCategory.animate().translationY(0).setListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                super.onAnimationEnd(animation);
+                mTxtNewCategory.setVisibility(View.VISIBLE);
+            }
+        });
+    }
+
+    public void hideNewInput() {
+        if (mTxtNewCategory == null) return;
+
+        mTxtNewCategory.animate().translationY(-mTxtNewCategory.getHeight()).setListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                super.onAnimationEnd(animation);
+                mTxtNewCategory.setVisibility(View.GONE);
+            }
+        });
     }
 
     void addBucket(@NonNull Bucket bucket) {
@@ -238,7 +305,8 @@ public class TimeBucketsActivity extends AppCompatActivity {
             imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
         }
 
-        mTxtNewCategory.setVisibility(View.GONE);
+        //mTxtNewCategory.setVisibility(View.GONE);
+        hideNewInput();
     }
 
     private HashMap<String, String> createPlanet(String key, String name) {
@@ -260,7 +328,8 @@ public class TimeBucketsActivity extends AppCompatActivity {
         // Handle item selection
         switch (item.getItemId()) {
             case R.id.menu_add:
-                mTxtNewCategory.setVisibility(View.VISIBLE);
+                //mTxtNewCategory.setVisibility(View.VISIBLE);
+                showNewInput();
                 mTxtNewCategory.requestFocus();
 
                 View view = this.getCurrentFocus();
@@ -293,7 +362,8 @@ public class TimeBucketsActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         if (mTxtNewCategory != null && mTxtNewCategory.getVisibility() == View.VISIBLE) {
-            mTxtNewCategory.setVisibility(View.GONE);
+            //mTxtNewCategory.setVisibility(View.GONE);
+            hideNewInput();
         } else {
             super.onBackPressed();
         }
@@ -341,6 +411,32 @@ public class TimeBucketsActivity extends AppCompatActivity {
         }
     }
 
+    private Runnable updateRunnable = new Runnable() {
+        @Override
+        public void run() {
+
+        }
+    };
+
+    private BucketsHandler mHandler = new BucketsHandler();
+
+    class BucketsHandler extends Handler {
+        static final int MESSAGE_UPDATE_CURRENT_DURATION = 0;
+
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case MESSAGE_UPDATE_CURRENT_DURATION:
+                    if (mCurrentBucket == null || mCurrentBucket.name.equals(BUCKET_BREAK.name) || mAdapter == null || isFinishing())
+                        return;
+
+                    onTick();
+                    mAdapter.notifyDataSetChanged();
+                    mHandler.sendEmptyMessageDelayed(MESSAGE_UPDATE_CURRENT_DURATION, 1000);
+            }
+        }
+    }
+
 
     public class TimerBucketsAdapter extends ArrayAdapter {
         public TimerBucketsAdapter(Context context, int resource, List objects) {
@@ -365,11 +461,18 @@ public class TimeBucketsActivity extends AppCompatActivity {
 
             if (mListView.isItemChecked(position)) {
                 row.setBackgroundColor(HIGHLIGHT_COLOR);
-                tv2.setText(elapsed <= 0 || position == 0 ? "" : getString(R.string.time_and_counting, DateUtils.formatElapsedTime(elapsed / 1000)));
+
+                if (position != 0 && !isFinishing()) {
+                    mHandler.removeMessages(BucketsHandler.MESSAGE_UPDATE_CURRENT_DURATION);
+                    mHandler.sendEmptyMessageDelayed(BucketsHandler.MESSAGE_UPDATE_CURRENT_DURATION, UPDATE_TICK_MS);
+                }
             } else {
                 row.setBackgroundColor(Color.TRANSPARENT);
-                tv2.setText(elapsed <= 0 || position == 0 ? "" : getString(R.string.time_elapsed, DateUtils.formatElapsedTime(elapsed / 1000)));
             }
+
+            String text = elapsed > 0 && position != 0 ?
+                    getString(R.string.time_elapsed, mElapsedFormat.format(new Date(elapsed))) : "";
+            tv2.setText(text);
 
             return row;
         }
