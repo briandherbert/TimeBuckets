@@ -11,7 +11,6 @@ import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.text.Html;
-import android.text.format.DateUtils;
 import android.util.Log;
 import android.view.ContextMenu;
 import android.view.KeyEvent;
@@ -240,12 +239,12 @@ public class TimeBucketsActivity extends AppCompatActivity {
             if (name == null) break;
 
             long duration = mSharedPrefs.getLong(PREFIX_KEY_BUCKET_DURATION + name, 0);
-            Log.v("blarg", "restoring " + name);
 
             if (name.equals(currentName)) {
                 mCurrentStartTime = mSharedPrefs.getLong(KEY_CURRENT_BUCKET_START_TIME, -1);
-                mLastTick = mSharedPrefs.getLong(KEY_LAST_TICK, -1);
-                mCurrentBucket = new Bucket(name, duration + System.currentTimeMillis() - mLastTick);
+                mLastTick = mSharedPrefs.getLong(KEY_LAST_TICK, 0);
+                mCurrentBucket = new Bucket(name, duration);
+
                 addBucket(mCurrentBucket);
                 setCurrentBucket(mCurrentBucket);
             } else {
@@ -271,10 +270,27 @@ public class TimeBucketsActivity extends AppCompatActivity {
                 mTxtNewCategory.setVisibility(View.VISIBLE);
             }
         });
+
+        mTxtNewCategory.requestFocus();
+
+        View view = this.getCurrentFocus();
+        if (view != null) {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.showSoftInput(view, 0);
+        }
     }
 
     public void hideNewInput() {
         if (mTxtNewCategory == null) return;
+
+        mTxtNewCategory.setText("");
+        mTxtNewCategory.clearFocus();
+
+        View view = this.getCurrentFocus();
+        if (view != null) {
+            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+            imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+        }
 
         mTxtNewCategory.animate().translationY(-mTxtNewCategory.getHeight()).setListener(new AnimatorListenerAdapter() {
             @Override
@@ -296,16 +312,6 @@ public class TimeBucketsActivity extends AppCompatActivity {
             mAdapter.notifyDataSetChanged();
         }
 
-        mTxtNewCategory.setText("");
-        mTxtNewCategory.clearFocus();
-
-        View view = this.getCurrentFocus();
-        if (view != null) {
-            InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-            imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
-        }
-
-        //mTxtNewCategory.setVisibility(View.GONE);
         hideNewInput();
     }
 
@@ -328,15 +334,8 @@ public class TimeBucketsActivity extends AppCompatActivity {
         // Handle item selection
         switch (item.getItemId()) {
             case R.id.menu_add:
-                //mTxtNewCategory.setVisibility(View.VISIBLE);
                 showNewInput();
-                mTxtNewCategory.requestFocus();
 
-                View view = this.getCurrentFocus();
-                if (view != null) {
-                    InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
-                    imm.showSoftInput(view, 0);
-                }
                 return true;
             case R.id.menu_clear_times:
                 clearAllTimes();
@@ -362,7 +361,6 @@ public class TimeBucketsActivity extends AppCompatActivity {
     @Override
     public void onBackPressed() {
         if (mTxtNewCategory != null && mTxtNewCategory.getVisibility() == View.VISIBLE) {
-            //mTxtNewCategory.setVisibility(View.GONE);
             hideNewInput();
         } else {
             super.onBackPressed();
