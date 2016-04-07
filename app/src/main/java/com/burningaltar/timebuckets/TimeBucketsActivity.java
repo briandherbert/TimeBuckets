@@ -11,7 +11,6 @@ import android.support.annotation.NonNull;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.text.Html;
-import android.util.Log;
 import android.view.ContextMenu;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -34,10 +33,7 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Set;
 import java.util.TimeZone;
 
 public class TimeBucketsActivity extends AppCompatActivity {
@@ -209,7 +205,6 @@ public class TimeBucketsActivity extends AppCompatActivity {
             if (bucket.equals(BUCKET_BREAK)) continue;
             editor.putString(PREFIX_KEY_BUCKET_NAME + i++, bucket.name);
             editor.putLong(PREFIX_KEY_BUCKET_DURATION + bucket.name, bucket.duration);
-            Log.v("blarg", "saving " + bucket.name);
         }
 
         editor.remove(PREFIX_KEY_BUCKET_NAME + i);
